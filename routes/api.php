@@ -29,4 +29,5 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::put('transactions/{transaction}', [TransactionController::class, 'update']);
     Route::delete('transactions/{transaction}', [TransactionController::class, 'destroy']);
     Route::post('transactions/{transaction}/mark-received', [TransactionController::class, 'markReceived']);
+    Route::post('transactions/{transaction}/record-payment', [TransactionController::class, 'recordPayment']);
 });

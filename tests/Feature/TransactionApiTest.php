@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Person;
+use App\Models\Settlement;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -65,6 +66,47 @@ class TransactionApiTest extends TestCase
             ->assertUnprocessable();
     }
 
+    public function test_user_can_record_partial_and_full_payments(): void
+    {
+        $user = User::factory()->create();
+        $person = Person::query()->create([
+            'user_id' => $user->id,
+            'name' => 'Amit',
+        ]);
+
+        $transaction = Transaction::query()->create([
+            'user_id' => $user->id,
+            'person_id' => $person->id,
+            'type' => Transaction::TYPE_CREDIT_GIVEN,
+            'amount' => 3000,
+            'transaction_date' => '2026-08-01',
+            'status' => Transaction::STATUS_PENDING,
+        ]);
+
+        $this->withHeaders($this->authHeaders($user))
+            ->postJson("/api/transactions/{$transaction->id}/record-payment", [
+                'amount' => 1000,
+                'receivedOn' => '2026-08-05',
+                'receivedNote' => 'First UPI',
+            ])
+            ->assertOk()
+            ->assertJsonPath('transaction.status', Transaction::STATUS_PARTIAL)
+            ->assertJsonPath('transaction.receivedTotal', 1000)
+            ->assertJsonPath('transaction.remainingAmount', 2000);
+
+        $this->withHeaders($this->authHeaders($user))
+            ->postJson("/api/transactions/{$transaction->id}/record-payment", [
+                'amount' => 2000,
+                'receivedOn' => '2026-08-10',
+                'receivedNote' => 'Final cash',
+            ])
+            ->assertOk()
+            ->assertJsonPath('transaction.status', Transaction::STATUS_RECEIVED)
+            ->assertJsonPath('transaction.receivedTotal', 3000)
+            ->assertJsonPath('transaction.remainingAmount', 0)
+            ->assertJsonPath('transaction.receivedOn', '2026-08-10');
+    }
+
     public function test_user_can_mark_credit_received(): void
     {
         $user = User::factory()->create();
@@ -109,13 +151,34 @@ class TransactionApiTest extends TestCase
             'status' => Transaction::STATUS_PENDING,
         ]);
 
-        Transaction::query()->create([
+        $partial = Transaction::query()->create([
+            'user_id' => $user->id,
+            'person_id' => $person->id,
+            'type' => Transaction::TYPE_CREDIT_GIVEN,
+            'amount' => 1500,
+            'transaction_date' => now()->toDateString(),
+            'status' => Transaction::STATUS_PARTIAL,
+        ]);
+
+        Settlement::query()->create([
+            'transaction_id' => $partial->id,
+            'amount' => 500,
+            'received_on' => now()->toDateString(),
+        ]);
+
+        $received = Transaction::query()->create([
             'user_id' => $user->id,
             'person_id' => $person->id,
             'type' => Transaction::TYPE_CREDIT_GIVEN,
             'amount' => 1000,
             'transaction_date' => now()->toDateString(),
             'status' => Transaction::STATUS_RECEIVED,
+            'received_on' => now()->toDateString(),
+        ]);
+
+        Settlement::query()->create([
+            'transaction_id' => $received->id,
+            'amount' => 1000,
             'received_on' => now()->toDateString(),
         ]);
 
@@ -130,8 +193,8 @@ class TransactionApiTest extends TestCase
         $this->withHeaders($this->authHeaders($user))
             ->getJson('/api/summary')
             ->assertOk()
-            ->assertJsonPath('pendingCreditTotal', 2000)
-            ->assertJsonPath('receivedCreditTotal', 1000)
+            ->assertJsonPath('pendingCreditTotal', 3000)
+            ->assertJsonPath('receivedCreditTotal', 1500)
             ->assertJsonPath('expenseTotalThisMonth', 500);
     }
 

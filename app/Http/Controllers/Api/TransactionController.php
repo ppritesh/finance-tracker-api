@@ -4,12 +4,15 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\MarkReceivedRequest;
+use App\Http\Requests\Api\RecordPaymentRequest;
 use App\Http\Requests\Api\StoreTransactionRequest;
 use App\Http\Requests\Api\UpdateTransactionRequest;
+use App\Models\Settlement;
 use App\Models\Transaction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class TransactionController extends Controller
 {
@@ -17,7 +20,7 @@ class TransactionController extends Controller
     {
         $query = $request->user()
             ->transactions()
-            ->with('person')
+            ->with(['person', 'settlements'])
             ->orderByDesc('transaction_date')
             ->orderByDesc('id');
 
@@ -62,7 +65,7 @@ class TransactionController extends Controller
             'status' => $status,
         ]);
 
-        $transaction->load('person');
+        $transaction->load(['person', 'settlements']);
 
         return response()->json([
             'transaction' => $transaction->toApiArray(),
@@ -72,7 +75,7 @@ class TransactionController extends Controller
     public function show(Request $request, Transaction $transaction): JsonResponse
     {
         $this->authorizeTransaction($request, $transaction);
-        $transaction->load('person');
+        $transaction->load(['person', 'settlements']);
 
         return response()->json([
             'transaction' => $transaction->toApiArray(),
@@ -84,9 +87,9 @@ class TransactionController extends Controller
         $this->authorizeTransaction($request, $transaction);
 
         if ($transaction->type === Transaction::TYPE_CREDIT_GIVEN
-            && $transaction->status === Transaction::STATUS_RECEIVED) {
+            && in_array($transaction->status, [Transaction::STATUS_PARTIAL, Transaction::STATUS_RECEIVED], true)) {
             return response()->json([
-                'message' => 'Received credit transactions cannot be edited.',
+                'message' => 'Credit with payments recorded cannot be edited.',
             ], 422);
         }
 
@@ -106,7 +109,7 @@ class TransactionController extends Controller
             'received_note' => null,
         ]);
 
-        $transaction->load('person');
+        $transaction->load(['person', 'settlements']);
 
         return response()->json([
             'transaction' => $transaction->toApiArray(),
@@ -123,30 +126,79 @@ class TransactionController extends Controller
 
     public function markReceived(MarkReceivedRequest $request, Transaction $transaction): JsonResponse
     {
+        $transaction->load('settlements');
+        $remaining = $transaction->remainingAmount();
+
+        if ($remaining <= 0) {
+            return response()->json([
+                'message' => 'Transaction is already fully received.',
+            ], 422);
+        }
+
+        return $this->recordPaymentInternal(
+            $request,
+            $transaction,
+            $remaining,
+            $request->string('receivedOn')->toString(),
+            $request->string('receivedNote')->trim()->toString() ?: null,
+        );
+    }
+
+    public function recordPayment(RecordPaymentRequest $request, Transaction $transaction): JsonResponse
+    {
+        return $this->recordPaymentInternal(
+            $request,
+            $transaction,
+            (float) $request->input('amount'),
+            $request->string('receivedOn')->toString(),
+            $request->string('receivedNote')->trim()->toString() ?: null,
+        );
+    }
+
+    private function recordPaymentInternal(
+        Request $request,
+        Transaction $transaction,
+        float $amount,
+        string $receivedOn,
+        ?string $note,
+    ): JsonResponse {
         $this->authorizeTransaction($request, $transaction);
 
         if ($transaction->type !== Transaction::TYPE_CREDIT_GIVEN) {
             return response()->json([
-                'message' => 'Only credit given transactions can be marked received.',
+                'message' => 'Only credit given transactions can receive payments.',
             ], 422);
         }
 
         if ($transaction->status === Transaction::STATUS_RECEIVED) {
             return response()->json([
-                'message' => 'Transaction is already marked received.',
+                'message' => 'Transaction is already fully received.',
             ], 422);
         }
 
-        $transaction->update([
-            'status' => Transaction::STATUS_RECEIVED,
-            'received_on' => $request->string('receivedOn')->toString(),
-            'received_note' => $request->string('receivedNote')->trim()->toString() ?: null,
-        ]);
+        $transaction->load('settlements');
+        $remaining = $transaction->remainingAmount();
 
-        $transaction->load('person');
+        if ($amount > $remaining) {
+            return response()->json([
+                'message' => "Payment cannot exceed remaining amount of {$remaining}.",
+            ], 422);
+        }
+
+        DB::transaction(function () use ($transaction, $amount, $receivedOn, $note): void {
+            $transaction->settlements()->create([
+                'amount' => $amount,
+                'received_on' => $receivedOn,
+                'note' => $note,
+            ]);
+
+            $transaction->syncPaymentStatus();
+        });
+
+        $transaction->load(['person', 'settlements']);
 
         return response()->json([
-            'transaction' => $transaction->toApiArray(),
+            'transaction' => $transaction->fresh(['person', 'settlements'])->toApiArray(),
         ]);
     }
 
@@ -155,16 +207,22 @@ class TransactionController extends Controller
         $userId = $request->user()->id;
         $monthStart = Carbon::now()->startOfMonth()->toDateString();
 
-        $pendingCreditTotal = Transaction::query()
+        $creditTransactions = Transaction::query()
+            ->with('settlements')
             ->where('user_id', $userId)
             ->where('type', Transaction::TYPE_CREDIT_GIVEN)
-            ->where('status', Transaction::STATUS_PENDING)
-            ->sum('amount');
+            ->whereIn('status', [Transaction::STATUS_PENDING, Transaction::STATUS_PARTIAL])
+            ->get();
 
-        $receivedCreditTotal = Transaction::query()
-            ->where('user_id', $userId)
-            ->where('type', Transaction::TYPE_CREDIT_GIVEN)
-            ->where('status', Transaction::STATUS_RECEIVED)
+        $pendingCreditTotal = $creditTransactions->sum(
+            fn (Transaction $transaction) => $transaction->remainingAmount()
+        );
+
+        $receivedCreditTotal = Settlement::query()
+            ->whereHas('transaction', function ($query) use ($userId): void {
+                $query->where('user_id', $userId)
+                    ->where('type', Transaction::TYPE_CREDIT_GIVEN);
+            })
             ->whereDate('received_on', '>=', $monthStart)
             ->sum('amount');
 
