@@ -40,6 +40,8 @@ class Transaction extends Model
             'amount' => 'decimal:2',
             'transaction_date' => 'date',
             'received_on' => 'date',
+            'note' => 'encrypted',
+            'received_note' => 'encrypted',
         ];
     }
 

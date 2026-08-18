@@ -21,6 +21,7 @@ class Settlement extends Model
         return [
             'amount' => 'decimal:2',
             'received_on' => 'date',
+            'note' => 'encrypted',
         ];
     }
 

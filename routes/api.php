@@ -1,33 +1,38 @@
-<?php
-
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\PersonController;
-use App\Http\Controllers\Api\TransactionController;
-use Illuminate\Support\Facades\Route;
-
-Route::prefix('auth')->group(function (): void {
-    Route::post('register', [AuthController::class, 'register']);
-    Route::post('login', [AuthController::class, 'login']);
-
-    Route::middleware('auth:sanctum')->group(function (): void {
-        Route::post('logout', [AuthController::class, 'logout']);
-        Route::get('user', [AuthController::class, 'user']);
-    });
-});
-
-Route::middleware('auth:sanctum')->group(function (): void {
-    Route::get('summary', [TransactionController::class, 'summary']);
-
-    Route::get('persons', [PersonController::class, 'index']);
-    Route::post('persons', [PersonController::class, 'store']);
-    Route::put('persons/{person}', [PersonController::class, 'update']);
-    Route::delete('persons/{person}', [PersonController::class, 'destroy']);
-
-    Route::get('transactions', [TransactionController::class, 'index']);
-    Route::post('transactions', [TransactionController::class, 'store']);
-    Route::get('transactions/{transaction}', [TransactionController::class, 'show']);
-    Route::put('transactions/{transaction}', [TransactionController::class, 'update']);
-    Route::delete('transactions/{transaction}', [TransactionController::class, 'destroy']);
-    Route::post('transactions/{transaction}/mark-received', [TransactionController::class, 'markReceived']);
-    Route::post('transactions/{transaction}/record-payment', [TransactionController::class, 'recordPayment']);
-});
+<?php
+
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\PersonController;
+use App\Http\Controllers\Api\TransactionController;
+use App\Http\Controllers\Api\TwoFactorController;
+use Illuminate\Support\Facades\Route;
+
+Route::prefix('auth')->group(function (): void {
+    Route::post('register', [AuthController::class, 'register']);
+    Route::post('login', [AuthController::class, 'login']);
+    Route::post('two-factor/verify', [TwoFactorController::class, 'verify']);
+
+    Route::middleware('auth:sanctum')->group(function (): void {
+        Route::post('logout', [AuthController::class, 'logout']);
+        Route::get('user', [AuthController::class, 'user']);
+        Route::post('two-factor/setup', [TwoFactorController::class, 'setup']);
+        Route::post('two-factor/confirm', [TwoFactorController::class, 'confirm']);
+        Route::post('two-factor/disable', [TwoFactorController::class, 'disable']);
+    });
+});
+
+Route::middleware('auth:sanctum')->group(function (): void {
+    Route::get('summary', [TransactionController::class, 'summary']);
+
+    Route::get('persons', [PersonController::class, 'index']);
+    Route::post('persons', [PersonController::class, 'store']);
+    Route::put('persons/{person}', [PersonController::class, 'update']);
+    Route::delete('persons/{person}', [PersonController::class, 'destroy']);
+
+    Route::get('transactions', [TransactionController::class, 'index']);
+    Route::post('transactions', [TransactionController::class, 'store']);
+    Route::get('transactions/{transaction}', [TransactionController::class, 'show']);
+    Route::put('transactions/{transaction}', [TransactionController::class, 'update']);
+    Route::delete('transactions/{transaction}', [TransactionController::class, 'destroy']);
+    Route::post('transactions/{transaction}/mark-received', [TransactionController::class, 'markReceived']);
+    Route::post('transactions/{transaction}/record-payment', [TransactionController::class, 'recordPayment']);
+});

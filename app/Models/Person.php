@@ -17,6 +17,14 @@ class Person extends Model
         'phone',
     ];
 
+    /** @return array<string, string> */
+    protected function casts(): array
+    {
+        return [
+            'phone' => 'encrypted',
+        ];
+    }
+
     /** @return BelongsTo<User, $this> */
     public function user(): BelongsTo
     {

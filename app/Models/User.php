@@ -12,8 +12,8 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password'])]
-#[Hidden(['password', 'remember_token'])]
+#[Fillable(['name', 'email', 'password', 'two_factor_secret', 'two_factor_confirmed_at'])]
+#[Hidden(['password', 'remember_token', 'two_factor_secret'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -31,6 +31,12 @@ class User extends Authenticatable
         return $this->hasMany(Transaction::class);
     }
 
+    public function hasTwoFactorEnabled(): bool
+    {
+        return $this->two_factor_secret !== null
+            && $this->two_factor_confirmed_at !== null;
+    }
+
     /**
      * Get the attributes that should be cast.
      *
@@ -41,6 +47,8 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'two_factor_secret' => 'encrypted',
+            'two_factor_confirmed_at' => 'datetime',
         ];
     }
 }
